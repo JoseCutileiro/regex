@@ -23,6 +23,7 @@ use crate::{
     },
 };
 
+
 /// The configuration used for a Thompson NFA compiler.
 #[derive(Clone, Debug, Default)]
 pub struct Config {
@@ -1027,7 +1028,52 @@ impl Compiler {
             Look(ref look) => self.c_look(look),
             Repetition(ref rep) => self.c_repetition(rep),
             Capture(ref c) => self.c_cap(c.index, c.name.as_deref(), &c.sub),
-            Concat(ref es) => self.c_concat(es.iter().map(|e| self.c(e))),
+            Concat(ref es) => {
+                // Undo parser optimization that rewrites `(.*A)|(.*)` into `.*(A|.*)`.
+                // This restructuring breaks leftmost-first preference, so we restore
+                // the original alternation.
+                if es.len() == 2 {
+                    if let (Repetition(ref rep1), Alternation(ref alt_es)) =
+                        (&es[0].kind(), &es[1].kind())
+                    {
+                        if rep1.min == 0 && rep1.max.is_none() && rep1.greedy
+                            && (*rep1.sub == Hir::dot(hir::Dot::AnyCharExceptLF)
+                                || *rep1.sub == Hir::dot(hir::Dot::AnyByte))
+                        {
+                            let mut dot_arm = None;
+                            let mut other_arm = None;
+                            for (i, arm) in alt_es.iter().enumerate() {
+                                if let Repetition(ref rep2) = arm.kind() {
+                                    if rep2.min == 0 && rep2.max.is_none() && rep2.greedy
+                                        && (*rep2.sub == Hir::dot(hir::Dot::AnyCharExceptLF)
+                                            || *rep2.sub == Hir::dot(hir::Dot::AnyByte))
+                                    {
+                                        if dot_arm.is_none() {
+                                            dot_arm = Some(i);
+                                            continue;
+                                        }
+                                    }
+                                }
+                                other_arm = Some(i);
+                            }
+                            if let (Some(dot_idx), Some(other_idx)) = (dot_arm, other_arm) {
+                                let left = self.c_concat(
+                                    [self.c(&es[0]), self.c(&alt_es[other_idx])]
+                                        .into_iter(),
+                                )?;
+                                let right = self.c_concat(
+                                    [self.c(&es[0]), self.c(&alt_es[dot_idx])]
+                                        .into_iter(),
+                                )?;
+                                return self.c_alt_iter(
+                                    [Ok(left), Ok(right)].into_iter(),
+                                );
+                            }
+                        }
+                    }
+                }
+                self.c_concat(es.iter().map(|e| self.c(e)))
+            }
             Alternation(ref es) => self.c_alt_slice(es),
         }
     }
