@@ -1029,13 +1029,21 @@ impl Compiler {
             Capture(ref c) => self.c_cap(c.index, c.name.as_deref(), &c.sub),
             Concat(ref es) => {
                 if let [first, second] = es.as_slice() {
-                    if let (HirKind::Repetition(_), HirKind::Alternation(ref alt_branches)) =
-                        (first.kind(), second.kind())
+                    if let (
+                        HirKind::Repetition(_),
+                        HirKind::Alternation(ref alt_branches),
+                    ) = (first.kind(), second.kind())
                     {
-                        let branches = alt_branches.iter().map(|branch| {
-                            Hir::concat(vec![first.clone(), branch.clone()])
-                        });
-                        return self.c_alt_slice(&branches.collect::<Vec<_>>());
+                        let branches: Vec<_> = alt_branches
+                            .iter()
+                            .map(|branch| {
+                                Hir::concat(vec![
+                                    first.clone(),
+                                    branch.clone(),
+                                ])
+                            })
+                            .collect();
+                        return self.c_alt_slice(&branches);
                     }
                 }
                 self.c_concat(es.iter().map(|e| self.c(e)))
