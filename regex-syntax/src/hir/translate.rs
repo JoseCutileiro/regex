@@ -450,6 +450,14 @@ impl<'t, 'p> Visitor for TranslatorI<'t, 'p> {
                     }
                 }
                 exprs.reverse();
+                exprs.dedup_by(|next, prev| {
+                    if let HirKind::Repetition(r) = prev.kind() {
+                        if r.min == 0 && r.max.is_none() && prev == next {
+                            return true;
+                        }
+                    }
+                    false
+                });
                 self.push(HirFrame::Expr(Hir::concat(exprs)));
             }
             Ast::Alternation(_) => {
